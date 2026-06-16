@@ -129,7 +129,7 @@ if (-not (Test-Path $InstallerPath)) {
 $size = (Get-Item $InstallerPath).Length
 Write-OK "Found. Size: $([math]::Round($size/1MB,1)) MB"
 
-Write-Step "Starting XAMPP silent installation..."
+Write-Step "Starting XAMPP installation..."
 
 $installArgs = @(
     "--mode", "unattended",
