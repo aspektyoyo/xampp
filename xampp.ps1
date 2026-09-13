@@ -413,3 +413,4 @@ Remove-Item $stepFile -Force -ErrorAction SilentlyContinue
 
 try { [System.Console]::CursorVisible = $true } catch {}
 try { [System.Console]::Clear() } catch {}
+exit
