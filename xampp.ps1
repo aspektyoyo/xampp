@@ -1,284 +1,232 @@
 # ============================================================
-#  XAMPP Silent Installer v10
+#  XAMPP Silent Installer v10 (Spinning Donut Edition)
 # ============================================================
 
 $ProgressPreference = 'SilentlyContinue'
 
-Write-Host "[*] Stopping all XAMPP processes..." -ForegroundColor Cyan
+# Compile C# ASCII Spinning Donut Renderer
+$donutSource = @"
+using System;
+using System.Text;
 
-$xamppProcs = @("httpd","mysqld","xampp-control","xampp-installer","xampp_start","xampp_stop","mysqld-nt","mysqld-opt","perl")
-foreach ($p in $xamppProcs) {
-    taskkill /f /im "$p.exe" 2>$null | Out-Null
-}
+public class DonutRenderer {
+    private static float A = 0f, B = 0f;
+    private static float[] z = new float[1760];
+    private static char[] b = new char[1760];
 
-# Wait until all processes are actually gone (up to 15s)
-$deadline = (Get-Date).AddSeconds(15)
-do {
-    Start-Sleep -Milliseconds 500
-    $still = $xamppProcs | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }
-} while ($still -and (Get-Date) -lt $deadline)
+    public static void RenderFrame(double elapsedSeconds, int completedSteps) {
+        Array.Clear(b, 0, 1760);
+        Array.Clear(z, 0, 1760);
 
-if ($still) {
-    Write-Host "    [!!] Still running: $($still -join ', ') - forcing..." -ForegroundColor Red
-    $still | ForEach-Object { Stop-Process -Name $_ -Force -ErrorAction SilentlyContinue }
-    Start-Sleep -Seconds 2
-}
+        for (float j = 0; j < 6.28f; j += 0.07f) {
+            for (float i = 0; i < 6.28f; i += 0.02f) {
+                float c = (float)Math.Sin(i);
+                float d = (float)Math.Cos(j);
+                float e = (float)Math.Sin(A);
+                float f = (float)Math.Sin(j);
+                float g = (float)Math.Cos(A);
+                float h = d + 2f;
+                float D = 1f / (c * h * e + f * g + 5f);
+                float l = (float)Math.Cos(i);
+                float m = (float)Math.Cos(B);
+                float n = (float)Math.Sin(B);
+                float t = c * h * g - f * e;
 
-Write-Host "    [OK] All processes stopped" -ForegroundColor Green
+                int x = (int)(40 + 30 * D * (l * h * m - t * n));
+                int y = (int)(12 + 15 * D * (l * h * n + t * m));
+                int o = x + 80 * y;
+                int N = (int)(8 * ((f * e - c * d * g) * m - c * d * e - f * g - l * d * n));
 
-# Старт скачивания htdocs.zip в фоне (параллельно с очисткой и установкой)
-$DownloadDirEarly = "C:\XAMPP REPAIR"
-$ZipPathEarly     = Join-Path $DownloadDirEarly "htdocs.zip"
-if (-not (Test-Path $DownloadDirEarly)) { New-Item -ItemType Directory -Force -Path $DownloadDirEarly | Out-Null }
-
-$dlJob = Start-Job -ScriptBlock {
-    param($url, $out)
-    $ProgressPreference = 'SilentlyContinue'
-    [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-    Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
-} -ArgumentList "https://github.com/aspektyoyo/xampp/raw/main/htdocs.zip", $ZipPathEarly
-
-# Remove old XAMPP folder and wait until it's gone
-if (Test-Path "C:\xampp") {
-    Write-Host "    Removing old C:\xampp folder..." -ForegroundColor DarkGray
-    # Take ownership of all files (handles permission-locked files)
-    cmd /c "takeown /f C:\xampp /r /d y" 2>$null | Out-Null
-    # Grant full access to Administrators
-    cmd /c "icacls C:\xampp /grant Administrators:F /t /c /q" 2>$null | Out-Null
-    # Strip read-only, hidden, system attributes
-    cmd /c "attrib -r -h -s C:\xampp\* /s /d" 2>$null | Out-Null
-    # Use native cmd rmdir
-    cmd /c "rmdir /s /q C:\xampp" 2>$null | Out-Null
-    
-    $deadline2 = (Get-Date).AddSeconds(20)
-    while ((Test-Path "C:\xampp") -and (Get-Date) -lt $deadline2) {
-        Remove-Item -Recurse -Force "C:\xampp" -ErrorAction SilentlyContinue | Out-Null
-        Start-Sleep -Milliseconds 500
-    }
-    if (Test-Path "C:\xampp") {
-        Write-Host "    [!!] Could not fully remove C:\xampp" -ForegroundColor Red
-        Write-Host "    Attempting forced removal of remaining items..." -ForegroundColor DarkGray
-        Get-ChildItem "C:\xampp" -Recurse -Force -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending |
-            ForEach-Object { Remove-Item $_.FullName -Force -Recurse -ErrorAction SilentlyContinue }
-        Remove-Item "C:\xampp" -Force -Recurse -ErrorAction SilentlyContinue
-        if (Test-Path "C:\xampp") {
-            Write-Host "    [!!] C:\xampp still exists - installer may fail" -ForegroundColor Red
-        } else {
-            Write-Host "    [OK] C:\xampp removed on second attempt" -ForegroundColor Green
+                if (y >= 0 && y < 22 && x >= 0 && x < 80 && D > z[o]) {
+                    z[o] = D;
+                    string chars = ".,-~:;=!*#$@";
+                    b[o] = chars[N > 0 ? (N < chars.Length ? N : chars.Length - 1) : 0];
+                }
+            }
         }
-    } else {
-        Write-Host "    [OK] C:\xampp removed" -ForegroundColor Green
+
+        // Overlay timer in MM:SS format at top-left (y=0, x=0)
+        TimeSpan ts = TimeSpan.FromSeconds(elapsedSeconds);
+        string timerStr = string.Format("{0:D2}:{1:D2}", ts.Minutes, ts.Seconds);
+        for (int cIdx = 0; cIdx < timerStr.Length; cIdx++) {
+            b[cIdx] = timerStr[cIdx];
+        }
+
+        // Overlay 8 checkboxes stacked vertically on the left side (x=1, y=3 to y=10)
+        int totalCheckboxes = 8;
+        for (int step = 0; step < totalCheckboxes; step++) {
+            int yPos = 3 + step;
+            string boxStr = (step < completedSteps) ? "[X]" : "[ ]";
+            int baseIdx = 1 + 80 * yPos;
+            for (int chIdx = 0; chIdx < 3; chIdx++) {
+                b[baseIdx + chIdx] = boxStr[chIdx];
+            }
+        }
+
+        StringBuilder sb = new StringBuilder();
+        for (int k = 0; k < 1760; k++) {
+            sb.Append(k % 80 != 0 ? (b[k] != 0 ? b[k] : ' ') : '\n');
+        }
+
+        try {
+            Console.SetCursorPosition(0, 0);
+            Console.Write(sb.ToString());
+        } catch {}
+
+        A += 0.07f;
+        B += 0.03f;
     }
 }
+"@
 
-$DownloadDir   = "C:\XAMPP REPAIR"
-$InstallerPath = Join-Path $DownloadDir "xampp-installer.exe"
-$InstallDir    = "C:\xampp"
+Add-Type -TypeDefinition $donutSource -Language CSharp -ErrorAction SilentlyContinue
 
-$Disable = "xampp_filezilla,xampp_mercury,xampp_tomcat,xampp_perl,xampp_webalizer,xampp_sendmail"
+try { [System.Console]::Clear() } catch {}
+try { [System.Console]::CursorVisible = $false } catch {}
 
-function Write-Step { param([string]$M); Write-Host "`n[*] $M" -ForegroundColor Cyan }
-function Write-OK   { param([string]$M); Write-Host "    [OK] $M" -ForegroundColor Green }
-function Write-Fail { param([string]$M); Write-Host "    [!!] $M" -ForegroundColor Red }
+# Background installer worker scriptblock
+$workerBlock = {
+    $ProgressPreference = 'SilentlyContinue'
+    $stepFile = "$env:TEMP\xampp_installer_step.txt"
+    function Set-ProgressStep { param([int]$step); $step | Out-File -FilePath $stepFile -Encoding ascii -Force }
+    Set-ProgressStep 0
 
-$DoneMarker = "$InstallDir\phpMyAdmin\index.php"
+    # 1. Stop all XAMPP processes
+    $xamppProcs = @("httpd","mysqld","xampp-control","xampp-installer","xampp_start","xampp_stop","mysqld-nt","mysqld-opt","perl")
+    foreach ($p in $xamppProcs) {
+        taskkill /f /im "$p.exe" 2>$null | Out-Null
+    }
+    $deadline = (Get-Date).AddSeconds(15)
+    do {
+        Start-Sleep -Milliseconds 500
+        $still = $xamppProcs | Where-Object { Get-Process -Name $_ -ErrorAction SilentlyContinue }
+    } while ($still -and (Get-Date) -lt $deadline)
 
-Write-Step "Checking installer..."
+    if ($still) {
+        $still | ForEach-Object { Stop-Process -Name $_ -Force -ErrorAction SilentlyContinue }
+        Start-Sleep -Seconds 2
+    }
+    Set-ProgressStep 1
 
-if (-not (Test-Path $DownloadDir)) {
-    Write-Host "    Creating folder: $DownloadDir" -ForegroundColor DarkGray
-    New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null
-    Write-OK "Folder created"
-}
+    # 2. Start htdocs.zip background download
+    $DownloadDir = "C:\XAMPP REPAIR"
+    $ZipPath     = Join-Path $DownloadDir "htdocs.zip"
+    if (-not (Test-Path $DownloadDir)) { New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null }
 
-if (-not (Test-Path $InstallerPath)) {
-    Write-Host "    Installer not found. Downloading from GitHub..." -ForegroundColor Yellow
-    $installerUrl = "https://github.com/aspektyoyo/xampp/releases/latest/download/xampp-windows-x64.exe"
-
-    $instDlJob = Start-Job -ScriptBlock {
+    $dlJob = Start-Job -ScriptBlock {
         param($url, $out)
         $ProgressPreference = 'SilentlyContinue'
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
-    } -ArgumentList $installerUrl, $InstallerPath
+    } -ArgumentList "https://github.com/aspektyoyo/xampp/raw/main/htdocs.zip", $ZipPath
+    Set-ProgressStep 2
 
-    $dlSpinner = @('|','/','-','\')
-    $dlTick = 0
-    Write-Host "    Downloading xampp-installer.exe " -ForegroundColor DarkGray -NoNewline
-    while ($instDlJob.State -notin @('Completed','Failed','Stopped')) {
-        Write-Host "`b$($dlSpinner[$dlTick % 4])" -NoNewline -ForegroundColor Cyan
-        $dlTick++
-        Start-Sleep -Milliseconds 200
-    }
-    Write-Host "`b " -NoNewline
-    Write-Host ""
-
-    $instDlErr = $instDlJob.ChildJobs[0].JobStateInfo.Reason
-    Receive-Job -Job $instDlJob -ErrorAction SilentlyContinue | Out-Null
-    Remove-Job -Job $instDlJob -Force
-
-    if ($instDlErr -or -not (Test-Path $InstallerPath)) {
-        Write-Fail "Failed to download installer: $($instDlErr.Message)"
-        Read-Host "`nPress Enter to exit"
-        exit 1
-    }
-    Write-OK "Installer downloaded"
-}
-
-$size = (Get-Item $InstallerPath).Length
-Write-OK "Found. Size: $([math]::Round($size/1MB,1)) MB"
-
-Write-Step "Starting XAMPP installation..."
-
-$installArgs = @(
-    "--mode", "unattended",
-    "--unattendedmodeui", "none",
-    "--prefix", $InstallDir,
-    "--disable-components", $Disable,
-    "--installer-language", "en",
-    "--xampp_control_language", "en",
-    "--launchapps", "0"
-)
-
-Start-Process -FilePath $InstallerPath -ArgumentList $installArgs
-Start-Sleep -Seconds 5
-
-$installProc = Get-Process -Name "xampp-installer" -ErrorAction SilentlyContinue
-if ($installProc) {
-    Write-Host "    Installer started (PID: $($installProc.Id))" -ForegroundColor DarkGray
-} else {
-    Write-Host "    Waiting for installer..." -ForegroundColor DarkGray
-}
-
-$timeout = 600
-$elapsed = 0
-$step    = 1
-
-# ── Hourglass characters (PS 5.1 safe) ──────────────────────────────────────
-$B  = [char]0x2593  # ▓  sand
-$D  = [char]0x00B7  # ·  drip
-$EQ = [char]0x2550  # ═
-$TL = [char]0x2554  # ╔
-$TR = [char]0x2557  # ╗
-$BL = [char]0x255A  # ╚
-$BR = [char]0x255D  # ╝
-$WL = [char]0x2551  # ║
-
-$HTOP = "   $TL$EQ$EQ$EQ$EQ$EQ$TR"
-$HBOT = "   $BL$EQ$EQ$EQ$EQ$EQ$BR"
-
-# Each frame: 6 rows. Frames 0-3 → sand drains top→bottom (\/ shape)
-#                      Frames 4-7 → flipped (/\ shape), sand drains back
-$hgFrames = @(
-    @($HTOP, "   $WL ${B}${B}${B}  $WL", "    \  $D /  ", "    /    \  ", "   $WL      $WL", $HBOT),
-    @($HTOP, "   $WL ${B}${B}   $WL", "    \  $D /  ", "    /    \  ", "   $WL   $B  $WL", $HBOT),
-    @($HTOP, "   $WL  ${B}   $WL", "    \  $D /  ", "    /    \  ", "   $WL  ${B}${B} $WL", $HBOT),
-    @($HTOP, "   $WL       $WL", "    \  $D /  ", "    /    \  ", "   $WL ${B}${B}${B} $WL", $HBOT),
-    @($HTOP, "   $WL ${B}${B}${B}  $WL", "    /  $D \  ", "    \    /  ", "   $WL      $WL", $HBOT),
-    @($HTOP, "   $WL ${B}${B}   $WL", "    /  $D \  ", "    \    /  ", "   $WL   $B  $WL", $HBOT),
-    @($HTOP, "   $WL  ${B}   $WL", "    /  $D \  ", "    \    /  ", "   $WL  ${B}${B} $WL", $HBOT),
-    @($HTOP, "   $WL       $WL", "    /  $D \  ", "    \    /  ", "   $WL ${B}${B}${B} $WL", $HBOT)
-)
-# Colors per row: box, sand, drip-area, drip-area, sand, box
-$hgColors = @('DarkCyan','Yellow','DarkGray','DarkGray','Yellow','DarkCyan')
-
-# Reserve 8 lines (6 hourglass + 1 blank + 1 timer) and remember start position
-$animStart = $Host.UI.RawUI.CursorPosition
-Write-Host ("`n" * 7)   # push 7 extra lines so scrolling doesn't eat our space
-
-while ($elapsed -lt $timeout) {
-    Start-Sleep -Seconds $step
-    $elapsed += $step
-
-    $running = Get-Process -Name "xampp-installer" -ErrorAction SilentlyContinue
-    if (-not $running) {
-        if (Test-Path $DoneMarker) {
-            $Host.UI.RawUI.CursorPosition = $animStart
-            for ($cl = 0; $cl -lt 8; $cl++) { Write-Host (" " * 50) }
-            $Host.UI.RawUI.CursorPosition = $animStart
-            Write-Host "    Installation completed in ${elapsed}s" -ForegroundColor Green
-            break
-        } elseif ($elapsed -gt 15) {
-            $Host.UI.RawUI.CursorPosition = $animStart
-            for ($cl = 0; $cl -lt 8; $cl++) { Write-Host (" " * 50) }
-            $Host.UI.RawUI.CursorPosition = $animStart
-            Write-Fail "Installer is not running and phpMyAdmin not found!"
-            Read-Host "`nPress Enter to exit"
-            exit 1
+    # 3. Clean old C:\xampp
+    if (Test-Path "C:\xampp") {
+        cmd /c "takeown /f C:\xampp /r /d y" 2>$null | Out-Null
+        cmd /c "icacls C:\xampp /grant Administrators:F /t /c /q" 2>$null | Out-Null
+        cmd /c "attrib -r -h -s C:\xampp\* /s /d" 2>$null | Out-Null
+        cmd /c "rmdir /s /q C:\xampp" 2>$null | Out-Null
+        
+        $deadline2 = (Get-Date).AddSeconds(20)
+        while ((Test-Path "C:\xampp") -and (Get-Date) -lt $deadline2) {
+            Remove-Item -Recurse -Force "C:\xampp" -ErrorAction SilentlyContinue | Out-Null
+            Start-Sleep -Milliseconds 500
+        }
+        if (Test-Path "C:\xampp") {
+            Get-ChildItem "C:\xampp" -Recurse -Force -ErrorAction SilentlyContinue |
+                Sort-Object FullName -Descending |
+                ForEach-Object { Remove-Item $_.FullName -Force -Recurse -ErrorAction SilentlyContinue }
+            Remove-Item "C:\xampp" -Force -Recurse -ErrorAction SilentlyContinue
         }
     }
+    Set-ProgressStep 3
 
-    # ── Draw hourglass ────────────────────────────────────────────────────
-    $Host.UI.RawUI.CursorPosition = $animStart
-    $frame = $hgFrames[$elapsed % 8]
-    for ($r = 0; $r -lt 6; $r++) {
-        Write-Host $frame[$r] -ForegroundColor $hgColors[$r]
+    # 4. Check / download installer
+    $InstallerPath     = Join-Path $DownloadDir "xampp-installer.exe"
+    $FallbackInstaller = "D:\LPROG\Electronic cash register\xampp-windows-x64-7.4.29-1-VC15-installer.exe"
+    $InstallDir        = "C:\xampp"
+    $Disable           = "xampp_filezilla,xampp_mercury,xampp_tomcat,xampp_perl,xampp_webalizer,xampp_sendmail"
+
+    if (-not (Test-Path $InstallerPath)) {
+        if (Test-Path $FallbackInstaller) {
+            $InstallerPath = $FallbackInstaller
+        } else {
+            $installerUrl = "https://github.com/aspektyoyo/xampp/releases/latest/download/xampp-windows-x64.exe"
+            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -Uri $installerUrl -OutFile $InstallerPath -UseBasicParsing -ErrorAction Stop
+        }
     }
-    # Timer line
-    Write-Host ""
-    $mins    = [int][math]::Floor($elapsed / 60)
-    $secs    = $elapsed % 60
-    Write-Host ("   {0:00}:{1:00}" -f $mins, $secs) -ForegroundColor DarkGray -NoNewline
-    Write-Host (" " * 10)  # pad to clear any stale chars
-}
+    Set-ProgressStep 4
 
-if ($elapsed -ge $timeout) {
-    $Host.UI.RawUI.CursorPosition = $animStart
-    for ($cl = 0; $cl -lt 8; $cl++) { Write-Host (" " * 50) }
-    $Host.UI.RawUI.CursorPosition = $animStart
-    Write-Fail "Timeout! Installer did not finish after ${timeout}s"
-    Read-Host "`nPress Enter to exit"
-    exit 1
-}
+    # 5. Launch silent installation
+    $installArgs = @(
+        "--mode", "unattended",
+        "--unattendedmodeui", "none",
+        "--prefix", $InstallDir,
+        "--disable-components", $Disable,
+        "--installer-language", "en",
+        "--xampp_control_language", "en",
+        "--launchapps", "0"
+    )
 
-Write-Step "Configuring control panel settings..."
+    $InstallerName = [System.IO.Path]::GetFileNameWithoutExtension($InstallerPath)
+    Start-Process -FilePath $InstallerPath -ArgumentList $installArgs
+    Start-Sleep -Seconds 3
 
-$settingsPath = "$InstallDir\xampp-control.ini"
+    # Wait for installation completion
+    $DoneMarker = "$InstallDir\phpMyAdmin\index.php"
+    $timeout    = 600
+    $elapsed    = 0
+    while ($elapsed -lt $timeout) {
+        Start-Sleep -Seconds 1
+        $elapsed += 1
+        $running = Get-Process -Name $InstallerName -ErrorAction SilentlyContinue
+        if (-not $running) {
+            if (Test-Path $DoneMarker) { break }
+            if ($elapsed -gt 15) { break }
+        }
+    }
+    Set-ProgressStep 5
 
-if (Test-Path $settingsPath) {
-    $lines = Get-Content $settingsPath
-    $newLines = @()
-    $currentSection = ""
-    $autostartFound = $false
+    # 6. Configure xampp-control.ini
+    $settingsPath = "$InstallDir\xampp-control.ini"
+    if (Test-Path $settingsPath) {
+        $lines = Get-Content $settingsPath
+        $newLines = @()
+        $currentSection = ""
+        $autostartFound = $false
+        $newLines += "Language=english"
 
-    $newLines += "Language=english"
+        foreach ($line in $lines) {
+            $trimmed = $line.Trim()
+            if ($trimmed -match "^Language\s*=") { continue }
+            if ($currentSection -eq "Common" -and $trimmed -match "^Minimized\s*=") { continue }
+            if ($currentSection -eq "Autostart" -and $trimmed -match "^(Apache|MySQL)\s*=") { continue }
 
-    foreach ($line in $lines) {
-        $trimmed = $line.Trim()
-        
-        if ($trimmed -match "^Language\s*=") { continue }
-        if ($currentSection -eq "Common" -and $trimmed -match "^Minimized\s*=") { continue }
-        if ($currentSection -eq "Autostart" -and $trimmed -match "^(Apache|MySQL)\s*=") { continue }
-
-        if ($trimmed.StartsWith("[") -and $trimmed.EndsWith("]")) {
-            $currentSection = $trimmed.Substring(1, $trimmed.Length - 2).Trim()
+            if ($trimmed.StartsWith("[") -and $trimmed.EndsWith("]")) {
+                $currentSection = $trimmed.Substring(1, $trimmed.Length - 2).Trim()
+                $newLines += $line
+                if ($currentSection -eq "Common") { $newLines += "Minimized=1" }
+                if ($currentSection -eq "Autostart") {
+                    $autostartFound = $true
+                    $newLines += "Apache=1"
+                    $newLines += "MySQL=1"
+                }
+                continue
+            }
             $newLines += $line
-            if ($currentSection -eq "Common") {
-                $newLines += "Minimized=1"
-            }
-            if ($currentSection -eq "Autostart") {
-                $autostartFound = $true
-                $newLines += "Apache=1"
-                $newLines += "MySQL=1"
-            }
-            continue
         }
-        
-        $newLines += $line
-    }
 
-    if (-not $autostartFound) {
-        $newLines += ""
-        $newLines += "[Autostart]"
-        $newLines += "Apache=1"
-        $newLines += "MySQL=1"
-    }
-
-    $newLines -join "`r`n" | Set-Content -Path $settingsPath -Encoding Ascii
-    Write-OK "Settings (Language=english, Minimized=1, Autostart Apache=1, MySQL=1) updated in $settingsPath"
-} else {
-    $settingsContent = @"
+        if (-not $autostartFound) {
+            $newLines += ""
+            $newLines += "[Autostart]"
+            $newLines += "Apache=1"
+            $newLines += "MySQL=1"
+        }
+        $newLines -join "`r`n" | Set-Content -Path $settingsPath -Encoding Ascii
+    } else {
+        $settingsContent = @"
 Language=english
 
 [Common]
@@ -288,88 +236,37 @@ Minimized=1
 Apache=1
 MySQL=1
 "@
-    $settingsContent | Set-Content -Path $settingsPath -Encoding Ascii
-    Write-OK "Created new $settingsPath with custom settings"
-}
-
-$checks = @{
-    "xampp-control.exe"  = "$InstallDir\xampp-control.exe"
-    "Apache (httpd.exe)" = "$InstallDir\apache\bin\httpd.exe"
-    "MySQL (mysqld.exe)" = "$InstallDir\mysql\bin\mysqld.exe"
-    "phpMyAdmin"         = "$InstallDir\phpMyAdmin\index.php"
-}
-
-$allOk = $true
-foreach ($item in $checks.GetEnumerator()) {
-    if (Test-Path $item.Value) {
-        Write-OK "$($item.Key) - found"
-    } else {
-        Write-Fail "$($item.Key) - NOT found"
-        $allOk = $false
+        $settingsContent | Set-Content -Path $settingsPath -Encoding Ascii
     }
-}
+    Set-ProgressStep 6
 
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Cyan
-
-if ($allOk) {
-    Write-Host "  XAMPP installed successfully!" -ForegroundColor Green
-    
-    Write-Step "Setting up custom htdocs content..."
+    # 7. Extract htdocs.zip & setup permissions
     $HtdocsDir = Join-Path $InstallDir "htdocs"
-    $ZipPath = Join-Path $DownloadDir "htdocs.zip"
-    
-    try {
-        if (Test-Path $HtdocsDir) {
-            Write-Host "    Clearing htdocs folder..." -ForegroundColor DarkGray
-            Get-ChildItem -Path $HtdocsDir | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
-        } else {
-            New-Item -ItemType Directory -Force -Path $HtdocsDir | Out-Null
-        }
-
-        # Wait for background download job started earlier (show spinner if still in progress)
-        if ($dlJob.State -ne 'Completed') {
-            Write-Host "    Waiting for htdocs.zip..." -ForegroundColor DarkGray -NoNewline
-            $dlSpinner = @('|','/','-','\')
-            $dlTick = 0
-            while ($dlJob.State -notin @('Completed','Failed','Stopped')) {
-                Write-Host "`b$($dlSpinner[$dlTick % 4])" -NoNewline -ForegroundColor Cyan
-                $dlTick++
-                Start-Sleep -Milliseconds 200
-            }
-            Write-Host "`b " -NoNewline
-            Write-Host ""
-        }
-        $dlResult = Receive-Job -Job $dlJob -ErrorAction SilentlyContinue
-        $dlError  = $dlJob.ChildJobs[0].JobStateInfo.Reason
-        Remove-Job -Job $dlJob -Force
-
-        if ($dlError) {
-            throw "Background download failed: $($dlError.Message)"
-        }
-        Write-OK "htdocs.zip downloaded"
-        
-        Write-Host "    Extracting htdocs.zip..." -ForegroundColor DarkGray
-        Expand-Archive -Path $ZipPath -DestinationPath $HtdocsDir -Force
-        Write-OK "htdocs set up successfully"
-        
-        Write-Host "    Setting security permissions for xampp-control.ini..." -ForegroundColor DarkGray
-        if (Test-Path $settingsPath) {
-            $acl = Get-Acl $settingsPath
-            $identity = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::WorldSid, $null)
-            $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, "FullControl", "Allow")
-            $acl.SetAccessRule($rule)
-            Set-Acl $settingsPath $acl
-            Write-OK "Full Control permissions granted to Everyone on xampp-control.ini"
-        } else {
-            Write-Fail "xampp-control.ini not found, skipping permissions setup"
-        }
-    } catch {
-        Write-Fail "Failed to set up htdocs / permissions: $($_.Exception.Message)"
+    if (Test-Path $HtdocsDir) {
+        Get-ChildItem -Path $HtdocsDir | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+    } else {
+        New-Item -ItemType Directory -Force -Path $HtdocsDir | Out-Null
     }
 
-    Write-Host "  Starting control panel..." -ForegroundColor Green
-    Write-Host "============================================================" -ForegroundColor Cyan
+    # Wait for zip download job
+    while ($dlJob.State -notin @('Completed','Failed','Stopped')) { Start-Sleep -Milliseconds 200 }
+    Receive-Job -Job $dlJob -ErrorAction SilentlyContinue | Out-Null
+    Remove-Job -Job $dlJob -Force
+
+    if (Test-Path $ZipPath) {
+        Expand-Archive -Path $ZipPath -DestinationPath $HtdocsDir -Force
+    }
+
+    if (Test-Path $settingsPath) {
+        $acl = Get-Acl $settingsPath
+        $identity = New-Object System.Security.Principal.SecurityIdentifier([System.Security.Principal.WellKnownSidType]::WorldSid, $null)
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule($identity, "FullControl", "Allow")
+        $acl.SetAccessRule($rule)
+        Set-Acl $settingsPath $acl
+    }
+    Set-ProgressStep 7
+
+    # 8. Start Control Panel & handle language window
     try {
         $csCode = @"
 using System;
@@ -408,11 +305,7 @@ public class W {
         Add-Type -Path $csFile -ErrorAction Stop
         Remove-Item -Path $csFile -ErrorAction SilentlyContinue
 
-        # Launch control panel FIRST, then wait for the language dialog to appear
-        Write-Host "    Starting XAMPP Control Panel..." -ForegroundColor DarkGray
         Start-Process -FilePath "$InstallDir\xampp-control.exe" -WorkingDirectory $InstallDir
-
-        $found = $false
         for ($i = 0; $i -lt 30; $i++) {
             Start-Sleep -Milliseconds 500
             $hwnd = [W]::FindLangWindow()
@@ -420,32 +313,103 @@ public class W {
                 [W]::ShowWindow($hwnd, [W]::SW_RESTORE)
                 [W]::SetForegroundWindow($hwnd) | Out-Null
                 Start-Sleep -Milliseconds 300
-                # Try WM_CLOSE first, then ESC as fallback
                 [W]::SendMessage($hwnd, [W]::WM_CLOSE, [IntPtr]::Zero, [IntPtr]::Zero) | Out-Null
                 Start-Sleep -Milliseconds 200
-                # Send ESC just in case WM_CLOSE was ignored
                 [W]::PostMessage($hwnd, [W]::WM_KEYDOWN, [IntPtr]([W]::VK_ESCAPE), [IntPtr]::Zero) | Out-Null
-                Write-Host "    Language dialog closed (handle: $hwnd)" -ForegroundColor Yellow
-                $found = $true
                 break
             }
         }
-
-        if (-not $found) {
-            Write-Host "    Language dialog did not appear (already set or closed)" -ForegroundColor DarkGray
-        }
-
-        Write-Host "    XAMPP Control Panel started" -ForegroundColor Green
     } catch {
-        Write-Host "    Error: $($_.Exception.Message)" -ForegroundColor Red
-        # Fallback: just start the control panel without dialog handling
         Start-Process -FilePath "$InstallDir\xampp-control.exe" -WorkingDirectory $InstallDir -ErrorAction SilentlyContinue
     }
 
-    Write-Host "    Opening installation page: http://localhost/install.php..." -ForegroundColor DarkGray
+    # 9. Open installation web page
     Start-Process "http://localhost/install.php"
-} else {
-    Write-Host "  Something went wrong. Check folder $InstallDir" -ForegroundColor Yellow
-    Write-Host "============================================================" -ForegroundColor Cyan
-    Read-Host "`nPress Enter to exit"
+
+    # 10. Startup shortcut check & add (Dynamic user profiles + 'kassir' support)
+    # Dynamically detect Profiles directory (handles C:\Users, C:\Пользователи, D:\Users etc.)
+    $profilesDir = $env:SystemDrive + "\Users"
+    if (-not (Test-Path $profilesDir)) {
+        $profilesDir = $env:SystemDrive + "\Пользователи"
+    }
+    try {
+        $regProfiles = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList').ProfilesDirectory
+        if ($regProfiles -and (Test-Path $regProfiles)) { $profilesDir = $regProfiles }
+    } catch {}
+
+    # Candidate paths for user 'kassir'
+    $kassirDir = Join-Path $profilesDir "kassir"
+    $kassirStartup = Join-Path $kassirDir "AppData\Roaming\Microsoft\Windows\Start Menu\Programs\Startup"
+
+    $startupFolders = @(
+        $kassirStartup,
+        [Environment]::GetFolderPath("CommonStartup"),
+        "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp",
+        [Environment]::GetFolderPath("Startup"),
+        "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+    ) | Where-Object { $_ -and (Test-Path $_) } | Select-Object -Unique
+
+    $targetPath = [System.IO.Path]::GetFullPath("$InstallDir\xampp-control.exe")
+    $wshShell   = New-Object -ComObject WScript.Shell
+    $shortcutFound = $false
+
+    foreach ($folder in $startupFolders) {
+        Get-ChildItem -Path $folder -Filter "*.lnk" -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                $sc = $wshShell.CreateShortcut($_.FullName)
+                if ($sc.TargetPath) {
+                    $resolvedTarget = [System.IO.Path]::GetFullPath($sc.TargetPath)
+                    if ($resolvedTarget -ieq $targetPath) {
+                        $shortcutFound = $true
+                    }
+                }
+            } catch {}
+        }
+    }
+
+    if (-not $shortcutFound) {
+        # If user 'kassir' profile folder exists, direct shortcut there; otherwise use Common/Current startup
+        if (Test-Path $kassirDir) {
+            if (-not (Test-Path $kassirStartup)) {
+                New-Item -ItemType Directory -Force -Path $kassirStartup -ErrorAction SilentlyContinue | Out-Null
+            }
+            $targetFolder = $kassirStartup
+        } elseif ($startupFolders.Count -gt 0) {
+            $targetFolder = $startupFolders[0]
+        } else {
+            $targetFolder = "$env:ProgramData\Microsoft\Windows\Start Menu\Programs\StartUp"
+        }
+
+        $newShortcutPath = Join-Path $targetFolder "XAMPP Control Panel.lnk"
+        $newSc = $wshShell.CreateShortcut($newShortcutPath)
+        $newSc.TargetPath       = $targetPath
+        $newSc.WorkingDirectory = $InstallDir
+        $newSc.Save()
+    }
+    Set-ProgressStep 8
 }
+
+# Run background installation job
+$stepFile = "$env:TEMP\xampp_installer_step.txt"
+if (Test-Path $stepFile) { Remove-Item $stepFile -Force -ErrorAction SilentlyContinue }
+
+$bgJob = Start-Job -ScriptBlock $workerBlock
+$sw    = [System.Diagnostics.Stopwatch]::StartNew()
+
+# Animate Donut in foreground until background job completes
+while ($bgJob.State -eq 'Running') {
+    $completedSteps = 0
+    if (Test-Path $stepFile) {
+        try { $completedSteps = [int](Get-Content $stepFile -Raw -ErrorAction SilentlyContinue) } catch {}
+    }
+    [DonutRenderer]::RenderFrame($sw.Elapsed.TotalSeconds, $completedSteps)
+    Start-Sleep -Milliseconds 30
+}
+
+# Clean background job & step file
+Receive-Job -Job $bgJob -ErrorAction SilentlyContinue | Out-Null
+Remove-Job -Job $bgJob -Force
+Remove-Item $stepFile -Force -ErrorAction SilentlyContinue
+
+try { [System.Console]::CursorVisible = $true } catch {}
+try { [System.Console]::Clear() } catch {}
