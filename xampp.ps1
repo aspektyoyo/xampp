@@ -14,7 +14,11 @@ public class DonutRenderer {
     private static float[] z = new float[1760];
     private static char[] b = new char[1760];
 
-    public static void RenderFrame(double elapsedSeconds, int completedSteps) {
+    public static void RenderFrame(double elapsedSeconds) {
+        RenderFrame(elapsedSeconds, 1);
+    }
+
+    public static void RenderFrame(double elapsedSeconds, int currentStep) {
         Array.Clear(b, 0, 1760);
         Array.Clear(z, 0, 1760);
 
@@ -45,21 +49,26 @@ public class DonutRenderer {
             }
         }
 
-        // Overlay timer in MM:SS format at top-left (y=0, x=0)
+        // Overlay timer in MM:SS format at top-left (y=0, x=2)
         TimeSpan ts = TimeSpan.FromSeconds(elapsedSeconds);
         string timerStr = string.Format("{0:D2}:{1:D2}", ts.Minutes, ts.Seconds);
         for (int cIdx = 0; cIdx < timerStr.Length; cIdx++) {
-            b[cIdx] = timerStr[cIdx];
+            b[2 + cIdx] = timerStr[cIdx];
         }
 
-        // Overlay 8 checkboxes stacked vertically on the left side (x=1, y=3 to y=10)
-        int totalCheckboxes = 8;
-        for (int step = 0; step < totalCheckboxes; step++) {
-            int yPos = 3 + step;
-            string boxStr = (step < completedSteps) ? "[X]" : "[ ]";
-            int baseIdx = 1 + 80 * yPos;
-            for (int chIdx = 0; chIdx < 3; chIdx++) {
-                b[baseIdx + chIdx] = boxStr[chIdx];
+        // Overlay ONLY checkboxes at y=2..8 on left side (x=2)
+        int totalSteps = 7;
+        for (int s = 0; s < totalSteps; s++) {
+            int stepNum = s + 1;
+            string checkMark = "[ ]";
+            if (currentStep > stepNum) {
+                checkMark = "[x]";
+            } else if (currentStep == stepNum) {
+                checkMark = "[>]";
+            }
+            int startPos = 2 + (2 + s) * 80;
+            for (int cIdx = 0; cIdx < checkMark.Length; cIdx++) {
+                b[startPos + cIdx] = checkMark[cIdx];
             }
         }
 
@@ -87,11 +96,10 @@ try { [System.Console]::CursorVisible = $false } catch {}
 # Background installer worker scriptblock
 $workerBlock = {
     $ProgressPreference = 'SilentlyContinue'
-    $stepFile = "$env:TEMP\xampp_installer_step.txt"
-    function Set-ProgressStep { param([int]$step); $step | Out-File -FilePath $stepFile -Encoding ascii -Force }
-    Set-ProgressStep 0
-
+    $statusFile = Join-Path $env:TEMP "xampp_install_step.txt"
+    
     # 1. Stop all XAMPP processes
+    Set-Content -Path $statusFile -Value "1" -Force
     $xamppProcs = @("httpd","mysqld","xampp-control","xampp-installer","xampp_start","xampp_stop","mysqld-nt","mysqld-opt","perl")
     foreach ($p in $xamppProcs) {
         taskkill /f /im "$p.exe" 2>$null | Out-Null
@@ -106,9 +114,9 @@ $workerBlock = {
         $still | ForEach-Object { Stop-Process -Name $_ -Force -ErrorAction SilentlyContinue }
         Start-Sleep -Seconds 2
     }
-    Set-ProgressStep 1
 
     # 2. Start htdocs.zip background download
+    Set-Content -Path $statusFile -Value "2" -Force
     $DownloadDir = "C:\XAMPP REPAIR"
     $ZipPath     = Join-Path $DownloadDir "htdocs.zip"
     if (-not (Test-Path $DownloadDir)) { New-Item -ItemType Directory -Force -Path $DownloadDir | Out-Null }
@@ -119,9 +127,9 @@ $workerBlock = {
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
         Invoke-WebRequest -Uri $url -OutFile $out -UseBasicParsing -ErrorAction Stop
     } -ArgumentList "https://github.com/aspektyoyo/xampp/raw/main/htdocs.zip", $ZipPath
-    Set-ProgressStep 2
 
     # 3. Clean old C:\xampp
+    Set-Content -Path $statusFile -Value "3" -Force
     if (Test-Path "C:\xampp") {
         cmd /c "takeown /f C:\xampp /r /d y" 2>$null | Out-Null
         cmd /c "icacls C:\xampp /grant Administrators:F /t /c /q" 2>$null | Out-Null
@@ -140,26 +148,21 @@ $workerBlock = {
             Remove-Item "C:\xampp" -Force -Recurse -ErrorAction SilentlyContinue
         }
     }
-    Set-ProgressStep 3
 
     # 4. Check / download installer
+    Set-Content -Path $statusFile -Value "4" -Force
     $InstallerPath     = Join-Path $DownloadDir "xampp-installer.exe"
-    $FallbackInstaller = "D:\LPROG\Electronic cash register\xampp-windows-x64-7.4.29-1-VC15-installer.exe"
     $InstallDir        = "C:\xampp"
     $Disable           = "xampp_filezilla,xampp_mercury,xampp_tomcat,xampp_perl,xampp_webalizer,xampp_sendmail"
 
     if (-not (Test-Path $InstallerPath)) {
-        if (Test-Path $FallbackInstaller) {
-            $InstallerPath = $FallbackInstaller
-        } else {
-            $installerUrl = "https://github.com/aspektyoyo/xampp/releases/latest/download/xampp-windows-x64.exe"
-            [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-            Invoke-WebRequest -Uri $installerUrl -OutFile $InstallerPath -UseBasicParsing -ErrorAction Stop
-        }
+        $installerUrl = "https://github.com/aspektyoyo/xampp/releases/latest/download/xampp-windows-x64.exe"
+        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+        Invoke-WebRequest -Uri $installerUrl -OutFile $InstallerPath -UseBasicParsing -ErrorAction Stop
     }
-    Set-ProgressStep 4
 
     # 5. Launch silent installation
+    Set-Content -Path $statusFile -Value "5" -Force
     $installArgs = @(
         "--mode", "unattended",
         "--unattendedmodeui", "none",
@@ -187,9 +190,9 @@ $workerBlock = {
             if ($elapsed -gt 15) { break }
         }
     }
-    Set-ProgressStep 5
 
     # 6. Configure xampp-control.ini
+    Set-Content -Path $statusFile -Value "6" -Force
     $settingsPath = "$InstallDir\xampp-control.ini"
     if (Test-Path $settingsPath) {
         $lines = Get-Content $settingsPath
@@ -238,9 +241,9 @@ MySQL=1
 "@
         $settingsContent | Set-Content -Path $settingsPath -Encoding Ascii
     }
-    Set-ProgressStep 6
 
     # 7. Extract htdocs.zip & setup permissions
+    Set-Content -Path $statusFile -Value "7" -Force
     $HtdocsDir = Join-Path $InstallDir "htdocs"
     if (Test-Path $HtdocsDir) {
         Get-ChildItem -Path $HtdocsDir | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
@@ -264,7 +267,6 @@ MySQL=1
         $acl.SetAccessRule($rule)
         Set-Acl $settingsPath $acl
     }
-    Set-ProgressStep 7
 
     # 8. Start Control Panel & handle language window
     try {
@@ -386,31 +388,31 @@ public class W {
         $newSc.WorkingDirectory = $InstallDir
         $newSc.Save()
     }
-    Set-ProgressStep 8
+    Set-Content -Path $statusFile -Value "8" -Force
 }
 
-# Run background installation job
-$stepFile = "$env:TEMP\xampp_installer_step.txt"
-if (Test-Path $stepFile) { Remove-Item $stepFile -Force -ErrorAction SilentlyContinue }
+$statusFile = Join-Path $env:TEMP "xampp_install_step.txt"
+Remove-Item -Path $statusFile -ErrorAction SilentlyContinue
 
+# Run background installation job
 $bgJob = Start-Job -ScriptBlock $workerBlock
 $sw    = [System.Diagnostics.Stopwatch]::StartNew()
 
 # Animate Donut in foreground until background job completes
 while ($bgJob.State -eq 'Running') {
-    $completedSteps = 0
-    if (Test-Path $stepFile) {
-        try { $completedSteps = [int](Get-Content $stepFile -Raw -ErrorAction SilentlyContinue) } catch {}
+    $currentStep = 1
+    if (Test-Path $statusFile) {
+        $val = (Get-Content $statusFile -ErrorAction SilentlyContinue) -as [int]
+        if ($val) { $currentStep = $val }
     }
-    [DonutRenderer]::RenderFrame($sw.Elapsed.TotalSeconds, $completedSteps)
+    [DonutRenderer]::RenderFrame($sw.Elapsed.TotalSeconds, $currentStep)
     Start-Sleep -Milliseconds 30
 }
 
-# Clean background job & step file
+# Clean background job
+Remove-Item -Path $statusFile -ErrorAction SilentlyContinue
 Receive-Job -Job $bgJob -ErrorAction SilentlyContinue | Out-Null
 Remove-Job -Job $bgJob -Force
-Remove-Item $stepFile -Force -ErrorAction SilentlyContinue
 
 try { [System.Console]::CursorVisible = $true } catch {}
 try { [System.Console]::Clear() } catch {}
-exit
