@@ -152,13 +152,30 @@ $workerBlock = {
     # 4. Check / download installer
     Set-Content -Path $statusFile -Value "4" -Force
     $InstallerPath     = Join-Path $DownloadDir "xampp-installer.exe"
+    $FallbackInstaller = "D:\LPROG\Electronic cash register\xampp-windows-x64-7.4.29-1-VC15-installer.exe"
+    $ExpectedHash      = "811361c4127c64d405cc8f18c80006526614c2ff16c08ca4fcce7e5e9592f37b"
     $InstallDir        = "C:\xampp"
     $Disable           = "xampp_filezilla,xampp_mercury,xampp_tomcat,xampp_perl,xampp_webalizer,xampp_sendmail"
 
-    if (-not (Test-Path $InstallerPath)) {
+    function Test-FileHash {
+        param([string]$FilePath, [string]$Expected)
+        $actual = (Get-FileHash -Path $FilePath -Algorithm SHA256 -ErrorAction SilentlyContinue).Hash
+        return ($actual -and ($actual.ToLower() -eq $Expected.ToLower()))
+    }
+
+    if (Test-Path $InstallerPath) {
+        # Priority 1: local cache — use as-is
+    } elseif ((Test-Path $FallbackInstaller) -and (Test-FileHash -FilePath $FallbackInstaller -Expected $ExpectedHash)) {
+        # Priority 2: local fallback with valid hash
+        $InstallerPath = $FallbackInstaller
+    } else {
+        # Priority 3: download from GitHub, retry until hash matches
         $installerUrl = "https://github.com/aspektyoyo/xampp/releases/latest/download/xampp-windows-x64.exe"
         [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
-        Invoke-WebRequest -Uri $installerUrl -OutFile $InstallerPath -UseBasicParsing -ErrorAction Stop
+        do {
+            Remove-Item -Path $InstallerPath -Force -ErrorAction SilentlyContinue
+            Invoke-WebRequest -Uri $installerUrl -OutFile $InstallerPath -UseBasicParsing -ErrorAction Stop
+        } while (-not (Test-FileHash -FilePath $InstallerPath -Expected $ExpectedHash))
     }
 
     # 5. Launch silent installation
