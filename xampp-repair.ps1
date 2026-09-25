@@ -91,7 +91,7 @@ $DoneMarker = "$InstallDir\phpMyAdmin\index.php"
 Write-Step "Checking installer"
 
 $ExpectedHash    = "811361c4127c64d405cc8f18c80006526614c2ff16c08ca4fcce7e5e9592f37b"
-$FallbackInstaller = "D:\LPROG\Electronic cash register\xampp-windows-x64-7.4.29-1-VC15-installer.exe"
+$FallbackInstaller = "D:\LPROG\Xampp\xampp-windows-x64-7.4.29-1-VC15-installer.exe"
 
 function Test-InstallerHash {
     param([string]$Path)
