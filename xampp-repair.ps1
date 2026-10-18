@@ -1,5 +1,5 @@
 # ============================================================
-#  XAMPP Silent Installer v11
+#  XAMPP Silent Installer v10
 # ============================================================
 
 $ProgressPreference = 'SilentlyContinue'
@@ -308,12 +308,9 @@ if (Test-Path $settingsPath) {
                 $newLines += "Minimized=1"
             }
             if ($currentSection -eq "Autostart") {
-                # Panel autostart must always stay OFF (0): services are registered
-                # as Automatic in Step 10 and start themselves at boot/login, so the
-                # panel has nothing to do here (avoids double start + UAC prompts).
                 $autostartFound = $true
-                $newLines += "Apache=0"
-                $newLines += "MySQL=0"
+                $newLines += "Apache=1"
+                $newLines += "MySQL=1"
             }
             continue
         }
@@ -324,12 +321,12 @@ if (Test-Path $settingsPath) {
     if (-not $autostartFound) {
         $newLines += ""
         $newLines += "[Autostart]"
-        $newLines += "Apache=0"
-        $newLines += "MySQL=0"
+        $newLines += "Apache=1"
+        $newLines += "MySQL=1"
     }
 
     $newLines -join "`r`n" | Set-Content -Path $settingsPath -Encoding Ascii
-    Write-OK "Settings updated: Language=english, Minimized=1, Autostart Apache=0, MySQL=0"
+    Write-OK "Settings updated: Language=english, Minimized=1, Autostart Apache+MySQL"
 } else {
     $settingsContent = @"
 Language=english
@@ -338,8 +335,8 @@ Language=english
 Minimized=1
 
 [Autostart]
-Apache=0
-MySQL=0
+Apache=1
+MySQL=1
 "@
     $settingsContent | Set-Content -Path $settingsPath -Encoding Ascii
     Write-OK "Created new $settingsPath"
@@ -425,113 +422,7 @@ if ($allOk) {
         Write-Fail "Failed to set up htdocs: $($_.Exception.Message)"
     }
 
-    # ── Step 8: Install Windows services ────────────────────
-    Write-Step "Installing Apache and MySQL as Windows services"
-
-    $serviceBat = Join-Path $InstallDir "service.bat"
-
-    $desiredServices = @(
-        @{ Name = "Apache2.4"; BatArg = "apache"; Exe = "$InstallDir\apache\bin\httpd.exe"; ExeArgs = "-k install -n Apache2.4" },
-        @{ Name = "mysql";     BatArg = "mysql";  Exe = "$InstallDir\mysql\bin\mysqld.exe";  ExeArgs = "--install mysql" }
-    )
-
-    foreach ($svc in $desiredServices) {
-        $existing = Get-CimInstance -ClassName Win32_Service -ErrorAction SilentlyContinue |
-            Where-Object { $_.Name -eq $svc.Name }
-
-        if ($existing) {
-            # NOTE: PathName may be quoted (httpd -k install writes
-            # "C:\xampp\apache\bin\httpd.exe" -k runservice), so match the
-            # path with an optional leading quote instead of -like.
-            if ($existing.PathName -match ('^"?' + [regex]::Escape($InstallDir) + '\\')) {
-                Write-Info "$($svc.Name) - already registered to $InstallDir, skipping"
-                continue
-            }
-            # Service exists but points to another path - remove stale registration
-            Write-Info "$($svc.Name) - registered for another path, re-registering"
-            cmd /c "sc delete `"$($svc.Name)`"" | Out-Null
-            Start-Sleep -Seconds 2
-        }
-
-        # httpd.exe prints "Installing the ... service",
-        # "Testing httpd.conf....", "Errors reported here must be corrected
-        # before the service can be started." to STDERR, so capture both
-        # streams and show the output only if registration really failed.
-        $regOut = $null
-        if (Test-Path $serviceBat) {
-            Write-Info "Registering $($svc.Name) service"
-            $regOut = cmd /c "`"$serviceBat`" install $($svc.BatArg)" 2>&1
-        } elseif (Test-Path $svc.Exe) {
-            Write-Info "Registering $($svc.Name) service directly"
-            $regOut = cmd /c "`"$($svc.Exe)`" $($svc.ExeArgs)" 2>&1
-        } else {
-            Write-Fail "Service binary not found: $($svc.Exe)"
-        }
-
-        if ($regOut -and $LASTEXITCODE -ne 0) {
-            Write-Info (($regOut | Out-String).TrimEnd())
-        }
-    }
-
-    # NOTE: PathName may be quoted (httpd -k install writes
-    # "C:\xampp\apache\bin\httpd.exe" -k runservice), so match the path with
-    # an optional leading quote instead of -like "C:\xampp\*".
-    $svcInstalled = Get-CimInstance -ClassName Win32_Service -ErrorAction SilentlyContinue |
-        Where-Object { $_.PathName -match ('^"?' + [regex]::Escape($InstallDir) + '\\') }
-
-    if ($svcInstalled) {
-        foreach ($s in $svcInstalled) {
-            Set-Service -Name $s.Name -StartupType Automatic -ErrorAction SilentlyContinue
-
-            # Recovery tab: First/Second/Subsequent failure -> "Restart the
-            # Service", 5 s delay.  reset= 60 means the failure counter
-            # resets to 0 after 60 s of uninterrupted operation (crash-loop
-            # protection while still allowing future restarts).
-            sc.exe failure $s.Name reset= 60 actions= restart/5000/restart/5000/restart/5000 2>$null | Out-Null
-
-            # failureflag 1 = apply recovery actions even when the service
-            # exits cleanly (exit code 0), not only on crashes.  This covers
-            # the scenario where Windows stops the service during a shutdown
-            # attempt that is later cancelled (e.g. by a hung application).
-            sc.exe failureflag $s.Name 1 2>$null | Out-Null
-
-            # Grant Users (AU/IU) rights to start/stop the service so that
-            # xampp-control.exe can auto-start them on login without UAC prompts
-            $sd = "D:(A;;CCLCSWRPWPDTLOCRRC;;;SY)(A;;CCDCLCSWRPWPDTLOCRSDRCWDWO;;;BA)(A;;CCLCSWRPWPDTLOCRRC;;;AU)(A;;CCLCSWRPWPDTLOCRRC;;;IU)(A;;CCLCSWLOCRRC;;;SU)"
-            sc.exe sdset $s.Name $sd 2>$null | Out-Null
-
-            $running = ""
-            try {
-                Start-Service -Name $s.Name -ErrorAction Stop
-                $running = ", running"
-            } catch {
-                $running = " (will start with control panel)"
-            }
-            if ((Get-Service -Name $s.Name -ErrorAction SilentlyContinue).StartType -eq 'Automatic') {
-                Write-OK "$($s.Name) - installed, startup: Automatic, recovery: restart x3 (any stop)$running"
-            } else {
-                Write-Fail "$($s.Name) - installed, but could not set automatic startup"
-            }
-        }
-    } else {
-        Write-Fail "No XAMPP services found after registration"
-    }
-
-    # ── Disable Fast Startup ────────────────────────────────
-    # Fast Startup (HiberbootEnabled) hibernates the kernel on
-    # "Shut down" instead of performing a cold boot.  This means
-    # Automatic services do NOT start fresh on next power-on.
-    # Disabling it guarantees a real boot cycle every time.
-    $hiberPath = "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Power"
-    $hiberVal  = (Get-ItemProperty -Path $hiberPath -Name HiberbootEnabled -ErrorAction SilentlyContinue).HiberbootEnabled
-    if ($hiberVal -ne $null -and $hiberVal -ne 0) {
-        Set-ItemProperty -Path $hiberPath -Name HiberbootEnabled -Value 0 -ErrorAction SilentlyContinue
-        Write-OK "Fast Startup disabled (HiberbootEnabled=0)"
-    } else {
-        Write-Info "Fast Startup already disabled"
-    }
-
-    # ── Step 9: Start control panel ─────────────────────────
+    # ── Step 8: Start control panel ─────────────────────────
     Write-Step "Starting XAMPP Control Panel"
     try {
         $csCode = @"
@@ -599,52 +490,6 @@ public class W {
     } catch {
         Write-Fail "Error: $($_.Exception.Message)"
         Start-Process -FilePath "$InstallDir\xampp-control.exe" -WorkingDirectory $InstallDir -ErrorAction SilentlyContinue
-    }
-
-    # ── Step 10: Start the panel at every user logon ────────
-    # NOTE: this cannot be done with a service.  xampp-control.exe
-    # does not implement the SCM protocol - registering it with
-    # "sc create binPath= xampp-control.exe" makes SCM wait 30 s,
-    # log event 7009 and kill the process, so the service stays
-    # Stopped forever.  On top of that "start= auto" means "at
-    # kernel boot", not "at user logon", and a service always
-    # runs in Session 0, where the tray icon is invisible.
-    #
-    # A shortcut in the Startup folder is the mechanism that
-    # really starts the panel inside the user session at logon,
-    # without any UAC prompt.
-    Write-Step "Pinning XAMPP Control Panel to logon (Startup folder)"
-
-    $panelExe    = Join-Path $InstallDir "xampp-control.exe"
-    $startupDir  = [Environment]::GetFolderPath('Startup')
-    $panelLnk    = Join-Path $startupDir "xampp-control.lnk"
-
-    try {
-        $sh = New-Object -ComObject WScript.Shell
-
-        # Drop hand-made shortcuts pointing at the panel, otherwise
-        # the panel would start twice on the next logon.
-        Get-ChildItem $startupDir -Filter *.lnk -Force -ErrorAction SilentlyContinue | ForEach-Object {
-            $target = $sh.CreateShortcut($_.FullName).TargetPath
-            if ($target -and $target -ieq $panelExe) {
-                Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
-                Write-Info "Removed old shortcut: $($_.Name)"
-            }
-        }
-
-        $lnk = $sh.CreateShortcut($panelLnk)
-        $lnk.TargetPath       = $panelExe
-        $lnk.WorkingDirectory = $InstallDir
-        $lnk.Description      = "XAMPP Control Panel (starts at user logon)"
-        $lnk.Save()
-
-        if (Test-Path $panelLnk) {
-            Write-OK "Panel starts at logon: $panelLnk"
-        } else {
-            Write-Fail "Shortcut was not created"
-        }
-    } catch {
-        Write-Fail "Could not create the logon shortcut: $($_.Exception.Message)"
     }
 
     # ── Done ────────────────────────────────────────────────
