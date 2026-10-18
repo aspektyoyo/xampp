@@ -1,5 +1,5 @@
 # ============================================================
-#  XAMPP Silent Installer v10
+#  XAMPP Silent Installer v11
 # ============================================================
 
 $ProgressPreference = 'SilentlyContinue'
@@ -16,7 +16,41 @@ Write-Host "      XAMPP Silent Installer v10" -ForegroundColor Cyan
 Write-Host "  ===========================================" -ForegroundColor Cyan
 Write-Host ""
 
-# ── Step 1: Stop processes ──────────────────────────────────
+# ── Step 1: Stop and remove existing services ───────────────
+Write-Step "Stopping and removing existing Apache and MySQL services"
+
+$apacheServiceName = "Apache2.4"
+$mysqlServiceName = "mysql"
+
+# Stop and delete Apache service
+$apacheExists = & sc.exe query $apacheServiceName 2>&1
+if ($apacheExists -match "RUNNING|STOPPED|PAUSED") {
+    Write-Info "Stopping Apache service"
+    & sc.exe stop $apacheServiceName 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+}
+if ($apacheExists -match "RUNNING|STOPPED|PAUSED") {
+    Write-Info "Deleting Apache service"
+    & sc.exe delete $apacheServiceName 2>$null | Out-Null
+    Start-Sleep -Seconds 1
+}
+
+# Stop and delete MySQL service
+$mysqlExists = & sc.exe query $mysqlServiceName 2>&1
+if ($mysqlExists -match "RUNNING|STOPPED|PAUSED") {
+    Write-Info "Stopping MySQL service"
+    & sc.exe stop $mysqlServiceName 2>$null | Out-Null
+    Start-Sleep -Seconds 2
+}
+if ($mysqlExists -match "RUNNING|STOPPED|PAUSED") {
+    Write-Info "Deleting MySQL service"
+    & sc.exe delete $mysqlServiceName 2>$null | Out-Null
+    Start-Sleep -Seconds 1
+}
+
+Write-OK "Existing services removed"
+
+# ── Step 2: Stop processes ──────────────────────────────────
 Write-Step "Stopping all XAMPP processes"
 
 $xamppProcs = @("httpd","mysqld","xampp-control","xampp-installer","xampp_start","xampp_stop","mysqld-nt","mysqld-opt","perl")
@@ -309,8 +343,8 @@ if (Test-Path $settingsPath) {
             }
             if ($currentSection -eq "Autostart") {
                 $autostartFound = $true
-                $newLines += "Apache=1"
-                $newLines += "MySQL=1"
+                $newLines += "Apache=0"
+                $newLines += "MySQL=0"
             }
             continue
         }
@@ -321,12 +355,12 @@ if (Test-Path $settingsPath) {
     if (-not $autostartFound) {
         $newLines += ""
         $newLines += "[Autostart]"
-        $newLines += "Apache=1"
-        $newLines += "MySQL=1"
+        $newLines += "Apache=0"
+        $newLines += "MySQL=0"
     }
 
     $newLines -join "`r`n" | Set-Content -Path $settingsPath -Encoding Ascii
-    Write-OK "Settings updated: Language=english, Minimized=1, Autostart Apache+MySQL"
+    Write-OK "Settings updated: Language=english, Minimized=1, Autostart disabled (services managed separately)"
 } else {
     $settingsContent = @"
 Language=english
@@ -335,8 +369,8 @@ Language=english
 Minimized=1
 
 [Autostart]
-Apache=1
-MySQL=1
+Apache=0
+MySQL=0
 "@
     $settingsContent | Set-Content -Path $settingsPath -Encoding Ascii
     Write-OK "Created new $settingsPath"
@@ -422,7 +456,144 @@ if ($allOk) {
         Write-Fail "Failed to set up htdocs: $($_.Exception.Message)"
     }
 
-    # ── Step 8: Start control panel ─────────────────────────
+    # ── Step 8: Install and configure services ───────────────
+    Write-Step "Installing Apache and MySQL as Windows services"
+    try {
+        $apacheExe = "$InstallDir\apache\bin\httpd.exe"
+        $mysqlExe = "$InstallDir\mysql\bin\mysqld.exe"
+        $apacheServiceName = "Apache2.4"
+        $mysqlServiceName = "mysql"
+
+        # Install Apache service
+        Write-Info "Installing Apache service"
+        $apacheInstallArgs = @("-k", "install", "-n", $apacheServiceName, "-f", "$InstallDir\apache\conf\httpd.conf")
+        $apacheResult = Start-Process -FilePath $apacheExe -ArgumentList $apacheInstallArgs -Wait -PassThru -WindowStyle Hidden
+        if ($apacheResult.ExitCode -eq 0) {
+            Write-OK "Apache service installed"
+        } else {
+            Write-Info "Apache service may already exist or installation returned non-zero exit code"
+        }
+
+        # Install MySQL service
+        Write-Info "Installing MySQL service"
+        $mysqlInstallArgs = @("--install", $mysqlServiceName, "--defaults-file=$InstallDir\mysql\bin\my.ini")
+        $mysqlResult = Start-Process -FilePath $mysqlExe -ArgumentList $mysqlInstallArgs -Wait -PassThru -WindowStyle Hidden
+        if ($mysqlResult.ExitCode -eq 0) {
+            Write-OK "MySQL service installed"
+        } else {
+            Write-Info "MySQL service may already exist or installation returned non-zero exit code"
+        }
+
+        # Configure service recovery using sc.exe
+        Write-Info "Configuring service recovery policies"
+
+        # Apache recovery: restart on failure, reset after 1 day, restart immediately
+        # Subsequent failures covers all failures after the second one
+        $apacheRecoveryResult = & sc.exe failure $apacheServiceName reset= 86400 actions= restart/0/restart/0/restart/0 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "Apache service recovery configured"
+        } else {
+            Write-Info "Apache recovery configuration returned: $apacheRecoveryResult"
+        }
+
+        # MySQL recovery: restart on failure, reset after 1 day, restart immediately
+        # Subsequent failures covers all failures after the second one
+        $mysqlRecoveryResult = & sc.exe failure $mysqlServiceName reset= 86400 actions= restart/0/restart/0/restart/0 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "MySQL service recovery configured"
+        } else {
+            Write-Info "MySQL recovery configuration returned: $mysqlRecoveryResult"
+        }
+
+        # Enable "Enable actions for stops with errors" using sc.exe failureflag
+        Write-Info "Enabling recovery actions for stops with errors"
+        $apacheFlagResult = & sc.exe failureflag $apacheServiceName 1 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "Apache: enabled actions for stops with errors"
+        } else {
+            Write-Info "Apache failureflag returned: $apacheFlagResult"
+        }
+
+        $mysqlFlagResult = & sc.exe failureflag $mysqlServiceName 1 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "MySQL: enabled actions for stops with errors"
+        } else {
+            Write-Info "MySQL failureflag returned: $mysqlFlagResult"
+        }
+
+        # Set services to auto-start
+        Write-Info "Setting services to automatic startup"
+        $apacheAutoResult = & sc.exe config $apacheServiceName start= auto 2>&1
+        $mysqlAutoResult = & sc.exe config $mysqlServiceName start= auto 2>&1
+        if ($LASTEXITCODE -eq 0) {
+            Write-OK "Services set to automatic startup"
+        } else {
+            Write-Info "Auto-start configuration returned errors"
+            Write-Info "Apache: $apacheAutoResult"
+            Write-Info "MySQL: $mysqlAutoResult"
+        }
+
+        # Verify service configuration
+        Write-Info "Verifying service configuration"
+        $apacheQuery = & sc.exe query $apacheServiceName 2>&1
+        Write-Info "Apache service status:"
+        Write-Info $apacheQuery
+
+        $mysqlQuery = & sc.exe query $mysqlServiceName 2>&1
+        Write-Info "MySQL service status:"
+        Write-Info $mysqlQuery
+
+        # Verify recovery configuration
+        Write-Info "Verifying recovery configuration"
+        $apacheFailure = & sc.exe qfailure $apacheServiceName 2>&1
+        Write-Info "Apache recovery config:"
+        Write-Info $apacheFailure
+
+        $mysqlFailure = & sc.exe qfailure $mysqlServiceName 2>&1
+        Write-Info "MySQL recovery config:"
+        Write-Info $mysqlFailure
+
+        # Start the services
+        Write-Info "Starting Apache service"
+        $apacheStartResult = Start-Process -FilePath $apacheExe -ArgumentList @("-k", "start", "-n", $apacheServiceName) -Wait -PassThru -WindowStyle Hidden
+        if ($apacheStartResult.ExitCode -eq 0) {
+            Write-OK "Apache service started"
+        } else {
+            Write-Info "Apache service start returned exit code: $($apacheStartResult.ExitCode)"
+        }
+
+        Write-Info "Starting MySQL service"
+        $mysqlStartResult = Start-Process -FilePath "net.exe" -ArgumentList @("start", $mysqlServiceName) -Wait -PassThru -WindowStyle Hidden
+        if ($mysqlStartResult.ExitCode -eq 0) {
+            Write-OK "MySQL service started"
+        } else {
+            Write-Info "MySQL service start returned exit code: $($mysqlStartResult.ExitCode)"
+        }
+
+        # Verify services are running
+        Start-Sleep -Seconds 3
+        Write-Info "Verifying services are running after start"
+        $apacheRunning = cmd /c "sc query $apacheServiceName" 2>&1
+        if ($apacheRunning -match "RUNNING") {
+            Write-OK "Apache service is running"
+        } else {
+            Write-Fail "Apache service is NOT running"
+            Write-Info $apacheRunning
+        }
+
+        $mysqlRunning = cmd /c "sc query $mysqlServiceName" 2>&1
+        if ($mysqlRunning -match "RUNNING") {
+            Write-OK "MySQL service is running"
+        } else {
+            Write-Fail "MySQL service is NOT running"
+            Write-Info $mysqlRunning
+        }
+
+    } catch {
+        Write-Fail "Error installing/configuring services: $($_.Exception.Message)"
+    }
+
+    # ── Step 9: Start control panel ─────────────────────────
     Write-Step "Starting XAMPP Control Panel"
     try {
         $csCode = @"
