@@ -12,7 +12,7 @@ function Write-HR    { Write-Host ("-" * 60) -ForegroundColor DarkGray }
 
 Write-Host ""
 Write-Host "  ===========================================" -ForegroundColor Cyan
-Write-Host "      XAMPP Silent Installer v10" -ForegroundColor Cyan
+Write-Host "      XAMPP Silent Installer v11" -ForegroundColor Cyan
 Write-Host "  ===========================================" -ForegroundColor Cyan
 Write-Host ""
 
